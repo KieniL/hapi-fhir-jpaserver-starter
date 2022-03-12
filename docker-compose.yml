@@ -1,27 +1,76 @@
-version: "3"
+version: '3.0'
 services:
+  oauth2-proxy:
+    container_name: oauth2-proxy
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.2.1
+    command: --config /oauth2-proxy.cfg --ssl-insecure-skip-verify
+    ports: []
+    hostname: oauth2-proxy
+    networks:
+      fhir: {}
+    volumes:
+      - "./oauth/oauth2-proxy.cfg:/oauth2-proxy.cfg"
+    restart: unless-stopped
+    depends_on:
+      - dex
+      - hapi-fhir-jpaserver-start
   hapi-webserver:
-    image: nginx:latest
+    image: nginx:1.18
     container_name: hapi-webserver
     restart: unless-stopped
+    networks:
+      fhir: {}
     ports:
-      - 8080:80
-      - 80:80
-      - 443:443
+    - 8080:80/tcp
+    - 80:80/tcp
+    - 443:443/tcp
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/localhost.crt:/etc/nginx/localhost.crt
-      - ./nginx/localhost.key:/etc/nginx/localhost.key
+      # - "./nginx/nginx-new.conf:/etc/nginx/conf.d/default.conf"
+      - ./nginx/nginx-new.conf:/etc/nginx/nginx.conf
+      - ./ssl/localhost.crt:/etc/nginx/localhost.crt
+      - ./ssl/localhost.key:/etc/nginx/localhost.key
+    hostname: nginx
+  dex:
+    container_name: dex
+    image: quay.io/dexidp/dex:v2.23.0
+    command: serve /dex.yaml
+    ports:
+      - 4190:4190/tcp
+    hostname: dex
+    volumes:
+      - "./dex/dex.yaml:/dex.yaml"
+      - ./ssl/localhost.crt:/etc/dex.localhost.crt
+      - ./ssl/localhost.key:/etc/dex.localhost.key
+    restart: unless-stopped
+    networks:
+      fhir:
+        aliases:
+        - dex.localhost
+    depends_on:
+      - etcd
+  etcd:
+    container_name: etcd
+    image: gcr.io/etcd-development/etcd:v3.4.7
+    entrypoint: /usr/local/bin/etcd
+    networks:
+      fhir: {}
+    command:
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
   hapi-fhir-jpaserver-start:
     build: .
     container_name: hapi-fhir-jpaserver-start
     restart: on-failure
+    networks:
+      fhir: {}
   hapi-fhir-mysql:
     image: mysql:latest
     container_name: hapi-fhir-mysql
     #https://dev.mysql.com/doc/refman/8.0/en/identifier-case-sensitivity.html
     command: --lower_case_table_names=1
     restart: always
+    networks:
+      fhir: {}
     environment:
       MYSQL_DATABASE: 'hapi'
       MYSQL_USER: 'admin'
@@ -31,3 +80,5 @@ services:
       - hapi-fhir-mysql:/var/lib/mysql
 volumes:
   hapi-fhir-mysql:
+networks:
+  fhir: {}
